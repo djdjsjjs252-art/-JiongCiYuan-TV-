@@ -3,22 +3,32 @@ package com.jcy.tv;
 import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
+import android.content.Context;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.media3.ui.PlayerView;
 
 /**
- * Native Android TV entry point. This deliberately contains no WebView.
- * Catalog and playback are kept behind a separate data layer until the
- * original app's authenticated API contract can be implemented safely.
+ * Native Android TV client. Playback accepts a user-provided authorized media URL.
+ * The original service's private/authenticated catalog API is not impersonated.
  */
 public final class MainActivity extends Activity {
     private static final int BG = Color.rgb(12, 15, 23);
@@ -26,7 +36,10 @@ public final class MainActivity extends Activity {
     private static final int ACCENT = Color.rgb(126, 92, 255);
     private LinearLayout root;
     private LinearLayout content;
-    private TextView pageTitle;
+    private EditText mediaUrl;
+    private PlayerView playerView;
+    private ExoPlayer player;
+    private TextView playbackStatus;
     private String currentPage = "首页";
 
     @Override public void onCreate(Bundle state) {
@@ -53,9 +66,7 @@ public final class MainActivity extends Activity {
         rail.setOrientation(LinearLayout.VERTICAL);
         rail.setGravity(Gravity.TOP);
         rail.setPadding(0, dp(4), dp(24), 0);
-        TextView brand = label("囧次元", 27, Color.WHITE, true);
-        rail.addView(brand, params(-1, dp(58)));
-
+        rail.addView(label("囧次元 TV", 25, Color.WHITE, true), params(-1, dp(58)));
         String[] pages = {"首页", "番剧", "电影", "搜索", "设置"};
         for (String page : pages) {
             Button item = navButton(page);
@@ -77,61 +88,105 @@ public final class MainActivity extends Activity {
     private void showPage(String page) {
         currentPage = page;
         content.removeAllViews();
-        pageTitle = label(page, 30, Color.WHITE, true);
-        content.addView(pageTitle, params(-1, dp(58)));
-
-        if ("搜索".equals(page)) {
-            showSearch();
-            return;
+        content.addView(label(page, 30, Color.WHITE, true), params(-1, dp(58)));
+        if ("首页".equals(page)) {
+            addMessage("电视端播放器已接入", "支持 HLS（m3u8）、DASH（mpd）及常见网络视频格式。使用遥控器选择输入框，输入你有权访问的视频直链后播放。");
+            showUrlPlayer();
+        } else if ("搜索".equals(page)) {
+            addMessage("内容搜索", "原版囧次元搜索服务需要有效的官方接口授权。目前尚未取得可独立调用的接口凭据，因此不会显示伪造的搜索结果。");
+        } else if ("番剧".equals(page) || "电影".equals(page)) {
+            addMessage(page + "内容库", "内容目录接口尚未完成合法接入。播放器已可用于播放你提供且有权访问的媒体直链。");
+        } else {
+            addMessage("播放设置", "使用 HTTPS 视频地址可直接播放。播放控制支持遥控器方向键、确认键和返回键。");
+            addMessage("版本信息", "囧次元 TV 原生客户端 1.1.0 · Android Media3 播放引擎");
         }
-        if ("设置".equals(page)) {
-            addMessage("电视端基础设置", "当前版本正在搭建原生电视界面与数据层。");
-            addMessage("内容接口", "原版 APK 使用 Flutter 编译代码，接口请求包含应用侧处理；尚未完成合法接口适配前，不会伪造影片列表或播放地址。");
-            return;
-        }
-        if ("番剧".equals(page) || "电影".equals(page)) {
-            addMessage(page + "内容", "内容服务尚未接通。接入原版可用的数据接口后，这里会显示真实分类与影片。");
-            return;
-        }
-        addMessage("为电视遥控器重新设计", "原生 Android 页面 · 方向键移动 · OK 确认 · 返回上一级");
-        addMessage("内容服务适配中", "已确认原版应用采用 Flutter，包含视频列表、搜索、详情、播放等独立接口路径。当前先搭建不依赖网页的电视端界面。");
     }
 
-    private void showSearch() {
-        TextView hint = label("搜索番剧或电影", 18, Color.LTGRAY, false);
-        content.addView(hint, params(-1, dp(42)));
-        EditText query = new EditText(this);
-        query.setSingleLine(true);
-        query.setTextColor(Color.WHITE);
-        query.setHintTextColor(Color.GRAY);
-        query.setHint("输入片名");
-        query.setTextSize(20);
-        query.setPadding(dp(16), 0, dp(16), 0);
-        query.setBackgroundColor(PANEL);
-        content.addView(query, params(-1, dp(58)));
-        Button go = navButton("搜索");
-        go.setOnClickListener(v -> {
-            String text = query.getText().toString().trim();
-            content.removeViews(2, content.getChildCount() - 2);
-            addMessage("搜索：" + (text.isEmpty() ? "未输入关键词" : text),
-                    "搜索服务尚未接通，接入原版可用接口后将显示真实结果。");
+    private void showUrlPlayer() {
+        content.addView(label("视频地址（m3u8 / mpd / mp4）", 17, Color.LTGRAY, false),
+                params(-1, dp(38)));
+        mediaUrl = new EditText(this);
+        mediaUrl.setSingleLine(true);
+        mediaUrl.setTextColor(Color.WHITE);
+        mediaUrl.setHintTextColor(Color.GRAY);
+        mediaUrl.setHint("https://example.com/video.m3u8");
+        mediaUrl.setTextSize(16);
+        mediaUrl.setSelectAllOnFocus(true);
+        mediaUrl.setPadding(dp(14), 0, dp(14), 0);
+        mediaUrl.setBackgroundColor(PANEL);
+        content.addView(mediaUrl, params(-1, dp(54)));
+
+        Button play = navButton("播放视频");
+        play.setOnClickListener(v -> startPlayback());
+        content.addView(play, params(dp(210), dp(52)));
+
+        playbackStatus = label("尚未开始播放", 14, Color.LTGRAY, false);
+        content.addView(playbackStatus, params(-1, dp(38)));
+
+        playerView = new PlayerView(this);
+        playerView.setUseController(true);
+        playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
+        playerView.setBackgroundColor(Color.BLACK);
+        LinearLayout.LayoutParams videoParams = params(-1, dp(330));
+        videoParams.topMargin = dp(8);
+        content.addView(playerView, videoParams);
+        playerView.setFocusable(true);
+        playerView.setFocusableInTouchMode(true);
+    }
+
+    private void startPlayback() {
+        String url = mediaUrl == null ? "" : mediaUrl.getText().toString().trim();
+        if (!(url.startsWith("https://") || url.startsWith("http://"))) {
+            Toast.makeText(this, "请输入有效的 http 或 https 视频地址", Toast.LENGTH_LONG).show();
+            mediaUrl.requestFocus();
+            return;
+        }
+        releasePlayer();
+        player = new ExoPlayer.Builder(this).build();
+        playerView.setPlayer(player);
+        player.addListener(new Player.Listener() {
+            @Override public void onPlaybackStateChanged(int state) {
+                if (playbackStatus == null) return;
+                if (state == Player.STATE_BUFFERING) playbackStatus.setText("正在缓冲…");
+                else if (state == Player.STATE_READY) playbackStatus.setText("正在播放");
+                else if (state == Player.STATE_ENDED) playbackStatus.setText("播放结束");
+                else if (state == Player.STATE_IDLE) playbackStatus.setText("等待播放");
+            }
+            @Override public void onPlayerError(PlaybackException error) {
+                if (playbackStatus != null) playbackStatus.setText("播放失败：" + error.getErrorCodeName());
+            }
         });
-        content.addView(go, params(dp(180), dp(54)));
-        query.requestFocus();
+        player.setMediaItem(MediaItem.fromUri(Uri.parse(url)));
+        player.prepare();
+        player.play();
+        playbackStatus.setText("正在连接视频源…");
+        playerView.requestFocus();
+        View focused = getCurrentFocus();
+        if (focused != null) {
+            ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE))
+                    .hideSoftInputFromWindow(focused.getWindowToken(), 0);
+        }
+    }
+
+    private void releasePlayer() {
+        if (player != null) {
+            player.release();
+            player = null;
+        }
+        if (playerView != null) playerView.setPlayer(null);
     }
 
     private void addMessage(String title, String body) {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(22), dp(16), dp(22), dp(16));
+        panel.setPadding(dp(20), dp(14), dp(20), dp(14));
         panel.setBackgroundColor(PANEL);
-        TextView heading = label(title, 20, Color.WHITE, true);
-        TextView description = label(body, 15, Color.LTGRAY, false);
-        description.setPadding(0, dp(8), 0, 0);
-        panel.addView(heading);
+        panel.addView(label(title, 19, Color.WHITE, true));
+        TextView description = label(body, 14, Color.LTGRAY, false);
+        description.setPadding(0, dp(7), 0, 0);
         panel.addView(description);
         LinearLayout.LayoutParams p = params(-1, -2);
-        p.bottomMargin = dp(14);
+        p.bottomMargin = dp(12);
         content.addView(panel, p);
     }
 
@@ -171,8 +226,21 @@ public final class MainActivity extends Activity {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
+    @Override protected void onStop() {
+        super.onStop();
+        if (player != null) player.pause();
+    }
+
+    @Override protected void onDestroy() {
+        releasePlayer();
+        super.onDestroy();
+    }
+
     @Override public void onBackPressed() {
-        if (!"首页".equals(currentPage)) showPage("首页");
+        if (player != null && player.isPlaying()) {
+            player.pause();
+            Toast.makeText(this, "已暂停", Toast.LENGTH_SHORT).show();
+        } else if (!"首页".equals(currentPage)) showPage("首页");
         else super.onBackPressed();
     }
 
