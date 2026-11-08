@@ -11,6 +11,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
+import android.view.inputmethod.EditorInfo;
 import android.content.Context;
 import android.widget.Button;
 import android.widget.EditText;
@@ -54,6 +55,10 @@ public final class MainActivity extends Activity {
                 | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         buildShell();
         showPage("首页");
+        root.post(() -> { if (root.getChildAt(0) instanceof LinearLayout) {
+            LinearLayout rail = (LinearLayout) root.getChildAt(0);
+            if (rail.getChildCount() > 1) rail.getChildAt(1).requestFocus();
+        }});
     }
 
     private void buildShell() {
@@ -93,7 +98,8 @@ public final class MainActivity extends Activity {
             addMessage("电视端播放器已接入", "支持 HLS（m3u8）、DASH（mpd）及常见网络视频格式。使用遥控器选择输入框，输入你有权访问的视频直链后播放。");
             showUrlPlayer();
         } else if ("搜索".equals(page)) {
-            addMessage("内容搜索", "原版囧次元搜索服务需要有效的官方接口授权。目前尚未取得可独立调用的接口凭据，因此不会显示伪造的搜索结果。");
+            addMessage("内容搜索暂未接通", "囧次元目录搜索需要官方授权接口。当前版本不伪造番剧列表；你可以在下方输入自己有权访问的视频直链进行播放。");
+            showUrlPlayer();
         } else if ("番剧".equals(page) || "电影".equals(page)) {
             addMessage(page + "内容库", "内容目录接口尚未完成合法接入。播放器已可用于播放你提供且有权访问的媒体直链。");
         } else {
@@ -107,6 +113,17 @@ public final class MainActivity extends Activity {
                 params(-1, dp(38)));
         mediaUrl = new EditText(this);
         mediaUrl.setSingleLine(true);
+        mediaUrl.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        mediaUrl.setImeOptions(EditorInfo.IME_ACTION_GO);
+        mediaUrl.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE
+                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                    && event.getAction() == KeyEvent.ACTION_DOWN)) {
+                startPlayback();
+                return true;
+            }
+            return false;
+        });
         mediaUrl.setTextColor(Color.WHITE);
         mediaUrl.setHintTextColor(Color.GRAY);
         mediaUrl.setHint("https://example.com/video.m3u8");
