@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -5,6 +6,7 @@
     <application
         android:allowBackup="false"
         android:label="囧次元 TV"
+        android:banner="@drawable/tv_banner"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity
